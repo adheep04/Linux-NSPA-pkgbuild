@@ -25,7 +25,7 @@ _config_Surface7=y
 
 # NUMA is optimized for multi-socket motherboards.
 # A single multi-core CPU actually runs slower with NUMA enabled.
-_NUMAdisable=y
+# _NUMAdisable=n
 
 # Disable MQ-Deadline I/O scheduler
 _mq_deadline_disable=y
@@ -190,22 +190,6 @@ prepare() {
 
     if [ -n "$_use_auto_optimization" ]; then
         "${srcdir}"/auto-cpu-optimization.sh
-    fi
-
-    if [ -n "$_NUMAdisable" ]; then
-        echo "Disabling NUMA from kernel config..."
-        scripts/config --disable NUMA \
-                       --disable AMD_NUMA \
-                       --disable X86_64_ACPI_NUMA \
-                       --disable NODES_SPAN_OTHER_NODES \
-                       --disable NUMA_EMU \
-                       --disable NEED_MULTIPLE_NODES \
-                       --disable USE_PERCPU_NUMA_NODE_ID \
-                       --disable ACPI_NUMA \
-                       --disable ARCH_SUPPORTS_NUMA_BALANCING \
-                       --disable NODES_SHIFT \
-                       --undefine NODES_SHIFT \
-                       --disable NEED_MULTIPLE_NODES
     fi
 
     if [ -n "$_mq_deadline_disable" ]; then
