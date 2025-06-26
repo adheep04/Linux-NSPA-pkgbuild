@@ -12,20 +12,8 @@
 _makemenuconfig=
 # Compile ONLY used modules to VASTLY reduce the number of modules built
 # and the build time.
-#
-# More at this wiki page ---> https://wiki.archlinux.org/index.php/Modprobed-db
-_localmodcfg=
-
-# Use the current kernel's .config file
 _use_current=
-
-# Microsoft Surface 7 specific config
-# unset =y to use generic kernel config (builds everything)
-# _config_Surface7=y
-
-# NUMA is optimized for multi-socket motherboards.
-# A single multi-core CPU actually runs slower with NUMA enabled.
-# _NUMAdisable=n
+_localmodcfg=
 
 # Disable MQ-Deadline I/O scheduler
 _mq_deadline_disable=y
@@ -106,7 +94,6 @@ source=(
   "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/snapshot/linux-6.16-rc3.tar.gz"
   "0000-patch-6.16-rc1-rt1.patch"
   "config"
-  "config_surface7"
   "auto-cpu-optimization.sh"
   "0001-ClearLinux-patchwork.patch"
   "0002-sched-fair-Compile-out-NUMA-code-entirely-when-NUMA-.patch"
@@ -145,22 +132,17 @@ source=(
   "1130-sched-Introduce-Cache-aware-scheduling-V3.patch"
 )
 
-
-prepare_custom_patch() {
-
-}
-
 export KBUILD_BUILD_HOST=archlinux
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
 
 prepare() {
-
   cd ${srcdir}/$_srcname
 
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "${pkgbase#linux}" > localversion.20-pkgname
 
+  # Apply patches first
   local src
   for src in "${source[@]}"; do
     src="${src%%::*}"
@@ -169,7 +151,7 @@ prepare() {
     if [[ $src == "0999-cpu-Force-Enable-VMX-hack.patch" && $_vmx_hack == "y" ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
-    elif [[ $src == "201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle == "y" ]]; then
+    elif [[ $src == "0201-sched-rt-Disable_RT_throttling-CFS-DL_Servers.patch" && $_no_RT_throttle == "y" ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
     elif [[ $src == "9999-sched_feat-compile-time.patch" && $_sched_feat_comp == "y" ]]; then
@@ -179,190 +161,189 @@ prepare() {
       echo "Applying patch $src..."
       patch -Rp1 < "../$src"
     elif [[ $src == *.patch ]]; then
-      # Apply other patches if they are present
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
     fi
   done
 
   echo "Setting config..."
-  zcat /proc/config.gz > .config
 
-    if [ -n "$_use_auto_optimization" ]; then
-        "${srcdir}"/auto-cpu-optimization.sh
+  # CHANGED: Use /proc/config.gz instead of config files
+  if [[ -r /proc/config.gz ]]; then
+    echo "Using config from running kernel (/proc/config.gz)..."
+    zcat /proc/config.gz > .config
+  else
+    echo "ERROR: /proc/config.gz not found!"
+    echo "Falling back to provided config..."
+    if [ -n "$_config_Surface7" ]; then
+      cp ../config_surface7 .config
+    else
+      cp ../config .config
     fi
+  fi
 
-    if [ -n "$_mq_deadline_disable" ]; then
-        echo "Disabling MQ-Deadline I/O scheduler..."
-        scripts/config --disable MQ_IOSCHED_DEADLINE
-    fi
+  # CRITICAL: Enable RT preemption (not in original!)
+  echo "Enabling RT preemption..."
+  scripts/config --disable CONFIG_PREEMPT_NONE
+  scripts/config --disable CONFIG_PREEMPT_VOLUNTARY
+  scripts/config --disable CONFIG_PREEMPT
+  scripts/config --enable CONFIG_PREEMPT_RT
+  scripts/config --enable CONFIG_PREEMPT_RT_FULL
 
-    if [ -n "$_kyber_disable" ]; then
-        echo "Disabling Kyber I/O scheduler..."
-        scripts/config --disable MQ_IOSCHED_KYBER
-    fi
+  # CRITICAL: Override NUMA disable
+  if [ -n "$_NUMAdisable" ]; then
+    echo "WARNING: Ignoring _NUMAdisable for better compatibility"
+    # Ensure NUMA stays enabled
+    scripts/config --enable CONFIG_NUMA
+    scripts/config --enable CONFIG_NUMA_BALANCING
+  fi
 
-    if [ "$_tickrate" = "perodic" ]; then
-        echo "Enabling periodic ticks..."
-        scripts/config --disable NO_HZ_IDLE \
-                      --disable NO_HZ_FULL \
-                      --disable NO_HZ \
-                      --disable NO_HZ_COMMON \
-                      --enable HZ_PERIODIC
-    elif [ "$_tickrate" = "idle" ]; then
-        echo "Enabling tickless idle..."
-        scripts/config --disable HZ_PERIODIC \
-                       --disable NO_HZ_FULL \
-                       --enable NO_HZ_IDLE \
-                       --enable NO_HZ \
-                       --enable NO_HZ_COMMON
-    elif [ "$_tickrate" = "full" ]; then
-        echo "Enabling tickless idle..."
-        scripts/config --disable HZ_PERIODIC \
-                       --disable NO_HZ_IDLE \
-                       --disable CONTEXT_TRACKING_FORCE \
-                       --enable NO_HZ_FULL_NODEF \
-                       --enable NO_HZ_FULL \
-                       --enable NO_HZ \
-                       --enable NO_HZ_COMMON \
-                       --enable CONTEXT_TRACKING
-    fi
+  # Ensure critical modules
+  echo "Ensuring critical modules..."
+  scripts/config --module CONFIG_USB_HID
+  scripts/config --module CONFIG_HID_GENERIC
+  scripts/config --module CONFIG_USB_STORAGE
 
-    if [ -n "$_nf_cone" ]; then
-        echo "Enabling FULLCONENAT..."
-        scripts/config --module IP_NF_TARGET_FULLCONENAT \
-                       --module NETFILTER_XT_TARGET_FULLCONENAT
-    fi
+  # Continue with original optimizations
+  if [ -n "$_use_auto_optimization" ]; then
+    "${srcdir}"/auto-cpu-optimization.sh
+  fi
 
-    if [ -n "$_spf_enable" ]; then
-        echo "Enabling SPECULATIVE_PAGE_FAULT LRU..."
-        scripts/config --enable SPECULATIVE_PAGE_FAULT
-    fi
+  if [ -n "$_mq_deadline_disable" ]; then
+    echo "Disabling MQ-Deadline I/O scheduler..."
+    scripts/config --disable CONFIG_MQ_IOSCHED_DEADLINE
+  fi
 
-    if [ -n "$_lru_enable" ]; then
-        echo "Enabling multigenerational LRU..."
-        scripts/config --enable ARCH_HAS_NONLEAF_PMD_YOUNG \
-                       --enable LRU_GEN \
-                       --enable LRU_GEN_ENABLED \
-                       --disable LRU_GEN_STATS
-    fi
+  if [ -n "$_kyber_disable" ]; then
+    echo "Disabling Kyber I/O scheduler..."
+    scripts/config --disable CONFIG_MQ_IOSCHED_KYBER
+  fi
 
-#    if [ -n "$_damon" ]; then
-#        echo "Enabling DAMON..."
-#        scripts/config --enable DAMON \
-#                       --disable DAMON_VADDR \
-#                       --disable DAMON_DBGFS \
-#                       --enable DAMON_PADDR \
-#                       --enable DAMON_RECLAIM
-#    fi
+  if [ "$_tickrate" = "perodic" ]; then
+    echo "Enabling periodic ticks..."
+    scripts/config --disable CONFIG_NO_HZ_IDLE \
+                   --disable CONFIG_NO_HZ_FULL \
+                   --disable CONFIG_NO_HZ \
+                   --disable CONFIG_NO_HZ_COMMON \
+                   --enable CONFIG_HZ_PERIODIC
+  elif [ "$_tickrate" = "idle" ]; then
+    echo "Enabling tickless idle..."
+    scripts/config --disable CONFIG_HZ_PERIODIC \
+                   --disable CONFIG_NO_HZ_FULL \
+                   --enable CONFIG_NO_HZ_IDLE \
+                   --enable CONFIG_NO_HZ \
+                   --enable CONFIG_NO_HZ_COMMON
+  elif [ "$_tickrate" = "full" ]; then
+    echo "Enabling tickless full..."
+    scripts/config --disable CONFIG_HZ_PERIODIC \
+                   --disable CONFIG_NO_HZ_IDLE \
+                   --disable CONFIG_CONTEXT_TRACKING_FORCE \
+                   --enable CONFIG_NO_HZ_FULL_NODEF \
+                   --enable CONFIG_NO_HZ_FULL \
+                   --enable CONFIG_NO_HZ \
+                   --enable CONFIG_NO_HZ_COMMON \
+                   --enable CONFIG_CONTEXT_TRACKING
+  fi
 
-    if [ -n "$_lrng_enable" ]; then
-        echo "Enabling Linux Random Number Generator ..."
-        scripts/config --disable RANDOM_DEFAULT_IMPL \
-                        --enable LRNG \
-                        --enable LRNG_OVERSAMPLE_ENTROPY_SOURCES \
-                        --set-val LRNG_OVERSAMPLE_ES_BITS 64 \
-                        --set-val LRNG_SEED_BUFFER_INIT_ADD_BITS 128 \
-                        --enable LRNG_IRQ \
-                        --enable LRNG_CONTINUOUS_COMPRESSION_ENABLED \
-                        --disable LRNG_CONTINUOUS_COMPRESSION_DISABLED \
-                        --enable LRNG_ENABLE_CONTINUOUS_COMPRESSION \
-                        --enable LRNG_SWITCHABLE_CONTINUOUS_COMPRESSION \
-                        --disable LRNG_COLLECTION_SIZE_512 \
-                        --enable LRNG_COLLECTION_SIZE_1024 \
-                        --disable LRNG_COLLECTION_SIZE_2048 \
-                        --disable LRNG_COLLECTION_SIZE_4096 \
-                        --disable LRNG_COLLECTION_SIZE_8192 \
-                        --set-val LRNG_COLLECTION_SIZE 1024 \
-                        --enable LRNG_HEALTH_TESTS \
-                        --set-val LRNG_RCT_CUTOFF 31 \
-                        --set-val LRNG_APT_CUTOFF 325 \
-                        --set-val LRNG_IRQ_ENTROPY_RATE 256 \
-                        --enable LRNG_JENT \
-                        --set-val LRNG_JENT_ENTROPY_RATE 16 \
-                        --enable LRNG_CPU \
-                        --set-val LRNG_CPU_ENTROPY_RATE 8 \
-                        --enable LRNG_DRNG_SWITCH \
-                        --enable LRNG_KCAPI_HASH \
-                        --module LRNG_DRBG \
-                        --module LRNG_KCAPI \
-                        --enable LRNG_TESTING_MENU \
-                        --disable LRNG_RAW_HIRES_ENTROPY \
-                        --disable LRNG_RAW_JIFFIES_ENTROPY \
-                        --disable LRNG_RAW_IRQ_ENTROPY \
-                        --disable LRNG_RAW_IRQFLAGS_ENTROPY \
-                        --disable LRNG_RAW_RETIP_ENTROPY \
-                        --disable LRNG_RAW_REGS_ENTROPY \
-                        --disable LRNG_RAW_ARRAY \
-                        --disable LRNG_IRQ_PERF \
-                        --disable LRNG_ACVT_HASH \
-                        --enable LRNG_RUNTIME_ES_CONFIG \
-                        --disable LRNG_RUNTIME_MAX_WO_RESEED_CONFIG \
-                        --disable LRNG_TEST_CPU_ES_COMPRESSION \
-                        --enable LRNG_SELFTEST \
-                        --disable LRNG_SELFTEST_PANIC
-    fi
+  if [ -n "$_nf_cone" ]; then
+    echo "Enabling FULLCONENAT..."
+    scripts/config --module CONFIG_IP_NF_TARGET_FULLCONENAT \
+                   --module CONFIG_NETFILTER_XT_TARGET_FULLCONENAT
+  fi
 
-    if [ -n "$_disable_debug" ]; then
-    scripts/config --disable DEBUG_INFO \
-                       --disable DEBUG_INFO_BTF \
-                       --disable DEBUG_INFO_DWARF4 \
-                       --disable DEBUG_INFO_DWARF5 \
-                       --disable PAHOLE_HAS_SPLIT_BTF \
-                       --disable DEBUG_INFO_BTF_MODULES \
-                       --disable SLUB_DEBUG \
-                       --disable PM_DEBUG \
-                       --disable PM_ADVANCED_DEBUG \
-                       --disable PM_SLEEP_DEBUG \
-                       --disable ACPI_DEBUG \
-                       --disable SCHED_DEBUG \
-                       --disable LATENCYTOP \
-                       --disable DEBUG_PREEMPT
-    fi
+  if [ -n "$_spf_enable" ]; then
+    echo "Enabling SPECULATIVE_PAGE_FAULT..."
+    scripts/config --enable CONFIG_SPECULATIVE_PAGE_FAULT
+  fi
 
-    ### Optionally use running kernel's config
-    # code originally by nous; http://aur.archlinux.org/packages.php?ID=40191
-    if [ -n "$_use_current" ]; then
-        if [[ -s /proc/config.gz ]]; then
-            echo "Extracting config from /proc/config.gz..."
-            # modprobe configs
-            zcat /proc/config.gz > ./.config
-        else
-            warning "Your kernel was not compiled with IKPROC!"
-            warning "You cannot read the current config!"
-            warning "Aborting!"
-            exit
-        fi
-    fi
+  if [ -n "$_lru_enable" ]; then
+    echo "Enabling multigenerational LRU..."
+    scripts/config --enable CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG \
+                   --enable CONFIG_LRU_GEN \
+                   --enable CONFIG_LRU_GEN_ENABLED \
+                   --disable CONFIG_LRU_GEN_STATS
+  fi
 
-    ### Optionally load needed modules for the make localmodconfig
-    # See https://aur.archlinux.org/packages/modprobed-db
-    if [ -n "$_localmodcfg" ]; then
-        if [ -e $HOME/.config/modprobed.db ]; then
-            echo "Running Steven Rostedt's make localmodconfig now"
-            make ${BUILD_FLAGS[*]} LSMOD=$HOME/.config/modprobed.db localmodconfig
-        else
-            echo "No modprobed.db data found"
-            exit
-        fi
-    fi
+  if [ -n "$_lrng_enable" ]; then
+    echo "Enabling Linux Random Number Generator..."
+    scripts/config --disable CONFIG_RANDOM_DEFAULT_IMPL \
+                   --enable CONFIG_LRNG \
+                   --enable CONFIG_LRNG_OVERSAMPLE_ENTROPY_SOURCES \
+                   --set-val CONFIG_LRNG_OVERSAMPLE_ES_BITS 64 \
+                   --set-val CONFIG_LRNG_SEED_BUFFER_INIT_ADD_BITS 128 \
+                   --enable CONFIG_LRNG_IRQ \
+                   --enable CONFIG_LRNG_CONTINUOUS_COMPRESSION_ENABLED \
+                   --disable CONFIG_LRNG_CONTINUOUS_COMPRESSION_DISABLED \
+                   --enable CONFIG_LRNG_ENABLE_CONTINUOUS_COMPRESSION \
+                   --enable CONFIG_LRNG_SWITCHABLE_CONTINUOUS_COMPRESSION \
+                   --disable CONFIG_LRNG_COLLECTION_SIZE_512 \
+                   --enable CONFIG_LRNG_COLLECTION_SIZE_1024 \
+                   --disable CONFIG_LRNG_COLLECTION_SIZE_2048 \
+                   --disable CONFIG_LRNG_COLLECTION_SIZE_4096 \
+                   --disable CONFIG_LRNG_COLLECTION_SIZE_8192 \
+                   --set-val CONFIG_LRNG_COLLECTION_SIZE 1024 \
+                   --enable CONFIG_LRNG_HEALTH_TESTS \
+                   --set-val CONFIG_LRNG_RCT_CUTOFF 31 \
+                   --set-val CONFIG_LRNG_APT_CUTOFF 325 \
+                   --set-val CONFIG_LRNG_IRQ_ENTROPY_RATE 256 \
+                   --enable CONFIG_LRNG_JENT \
+                   --set-val CONFIG_LRNG_JENT_ENTROPY_RATE 16 \
+                   --enable CONFIG_LRNG_CPU \
+                   --set-val CONFIG_LRNG_CPU_ENTROPY_RATE 8 \
+                   --enable CONFIG_LRNG_DRNG_SWITCH \
+                   --enable CONFIG_LRNG_KCAPI_HASH \
+                   --module CONFIG_LRNG_DRBG \
+                   --module CONFIG_LRNG_KCAPI \
+                   --enable CONFIG_LRNG_TESTING_MENU \
+                   --disable CONFIG_LRNG_RAW_HIRES_ENTROPY \
+                   --disable CONFIG_LRNG_RAW_JIFFIES_ENTROPY \
+                   --disable CONFIG_LRNG_RAW_IRQ_ENTROPY \
+                   --disable CONFIG_LRNG_RAW_IRQFLAGS_ENTROPY \
+                   --disable CONFIG_LRNG_RAW_RETIP_ENTROPY \
+                   --disable CONFIG_LRNG_RAW_REGS_ENTROPY \
+                   --disable CONFIG_LRNG_RAW_ARRAY \
+                   --disable CONFIG_LRNG_IRQ_PERF \
+                   --disable CONFIG_LRNG_ACVT_HASH \
+                   --enable CONFIG_LRNG_RUNTIME_ES_CONFIG \
+                   --disable CONFIG_LRNG_RUNTIME_MAX_WO_RESEED_CONFIG \
+                   --disable CONFIG_LRNG_TEST_CPU_ES_COMPRESSION \
+                   --enable CONFIG_LRNG_SELFTEST \
+                   --disable CONFIG_LRNG_SELFTEST_PANIC
+  fi
 
-    echo "Applying default config..."
-    make ${BUILD_FLAGS[*]}  olddefconfig
-    make ${BUILD_FLAGS[*]} -s kernelrelease > version
-    echo "Prepared $pkgbase version $(<version)"
+  if [ -n "$_disable_debug" ]; then
+    scripts/config --disable CONFIG_DEBUG_INFO \
+                   --disable CONFIG_DEBUG_INFO_BTF \
+                   --disable CONFIG_DEBUG_INFO_DWARF4 \
+                   --disable CONFIG_DEBUG_INFO_DWARF5 \
+                   --disable CONFIG_PAHOLE_HAS_SPLIT_BTF \
+                   --disable CONFIG_DEBUG_INFO_BTF_MODULES \
+                   --disable CONFIG_SLUB_DEBUG \
+                   --disable CONFIG_PM_DEBUG \
+                   --disable CONFIG_PM_ADVANCED_DEBUG \
+                   --disable CONFIG_PM_SLEEP_DEBUG \
+                   --disable CONFIG_ACPI_DEBUG \
+                   --disable CONFIG_SCHED_DEBUG \
+                   --disable CONFIG_LATENCYTOP \
+                   --disable CONFIG_DEBUG_PREEMPT
+  fi
 
-    ### Running make nconfig
-    [[ -z "$_makemenuonfig" ]] || make ${BUILD_FLAGS[*]} menuconfig
 
-    ### Save configuration for later reuse
-    cp -Tf ./.config "${startdir}/config-${pkgver}-${pkgrel}${pkgbase#linux}"
+  echo "Applying default config..."
+  make olddefconfig
+  make -s kernelrelease > version
+  echo "Prepared $pkgbase version $(<version)"
 
+  # Running make menuconfig if requested
+  [[ -z "$_makemenuconfig" ]] || make menuconfig
+
+  # Save configuration for later reuse
+  cp -Tf ./.config "${startdir}/config-${pkgver}-${pkgrel}${pkgbase#linux}"
 }
 
 build() {
   cd ${_srcname}
-  make ${BUILD_FLAGS[*]} -j3 all
+  make -j$(nproc) all
 }
 
 _package() {
