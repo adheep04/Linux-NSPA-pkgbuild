@@ -21,7 +21,7 @@ _use_current=
 
 # Microsoft Surface 7 specific config
 # unset =y to use generic kernel config (builds everything)
-_config_Surface7=y
+# _config_Surface7=y
 
 # NUMA is optimized for multi-socket motherboards.
 # A single multi-core CPU actually runs slower with NUMA enabled.
@@ -145,6 +145,11 @@ source=(
   "1130-sched-Introduce-Cache-aware-scheduling-V3.patch"
 )
 
+
+prepare_custom_patch() {
+
+}
+
 export KBUILD_BUILD_HOST=archlinux
 export KBUILD_BUILD_USER=$pkgbase
 export KBUILD_BUILD_TIMESTAMP="$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})"
@@ -181,12 +186,7 @@ prepare() {
   done
 
   echo "Setting config..."
-
-  if [ -n "$_config_Surface7" ]; then
-      cp ../config_surface7 .config
-  else
-      cp ../config .config
-  fi
+  zcat /proc/config.gz > .config
 
     if [ -n "$_use_auto_optimization" ]; then
         "${srcdir}"/auto-cpu-optimization.sh
