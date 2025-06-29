@@ -1,0 +1,10 @@
+--- a/drivers/pmdomain/core.c	2025-06-27 11:26:17.137986404 -0400
++++ b/drivers/pmdomain/core.c	2025-06-27 11:29:01.805094350 -0400
+@@ -23,6 +23,7 @@
+ #include <linux/export.h>
+ #include <linux/cpu.h>
+ #include <linux/debugfs.h>
++#include "../base/power/power.h" 
+ 
+ /* Provides a unique ID for each genpd device */
+ static DEFINE_IDA(genpd_ida);

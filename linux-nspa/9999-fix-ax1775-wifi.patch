@@ -1,0 +1,11 @@
+--- a/drivers/net/wireless/intel/iwlwifi/pcie/drv.c	2025-06-27 10:30:11.713364968 -0400
++++ b/drivers/net/wireless/intel/iwlwifi/pcie/drv.c	2025-06-27 10:34:43.484342988 -0400
+@@ -503,7 +503,7 @@
+ #endif /* CONFIG_IWLMVM */
+ #if IS_ENABLED(CONFIG_IWLMLD)
+ /* Bz devices */
+-	{IWL_PCI_DEVICE(0x272b, PCI_ANY_ID, iwl_gl_mac_cfg)},
++	{IWL_PCI_DEVICE(0x272b, PCI_ANY_ID, iwl_bz_mac_cfg)},
+ 	{IWL_PCI_DEVICE(0xA840, 0x0000, iwl_bz_mac_cfg)},
+ 	{IWL_PCI_DEVICE(0xA840, 0x0090, iwl_bz_mac_cfg)},
+ 	{IWL_PCI_DEVICE(0xA840, 0x0094, iwl_bz_mac_cfg)},

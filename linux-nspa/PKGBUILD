@@ -69,7 +69,7 @@ _no_RT_throttle=y
 _sched_feat_comp=y
 
 # iwlwifi on my Surface 7 is borked on Linux-6.16-rc3 ~ revert changes
-_revert_iwlwifi_cmdver=y
+_revert_iwlwifi_cmdver=n
 
  pkgbase=linux-nspa
 _major=6.16.0
@@ -106,7 +106,6 @@ source=(
   "0022-kt-vm-mm_optimizations.patch"
   "0019-hid-wacom-Silence_log_spam.patch"
   "0024-Kernel_tuning-CONFIG_NSPA.patch"
-  "0030-Microsoft_Surface_Support-6.14.patch"
   "0041-sched-fair-Dont_force_smt_balancing_when_CPU_has_spare.patch"
   "0050-async-patches.patch"
   "0051-drm-patches.patch"
@@ -128,8 +127,10 @@ source=(
   "1123-iwlwifi-mvm-allow_DTIM_periods_to_be_skipped.patch"
   "1131-pmdomain_rt_hacks.patch"
   "9999-sched_feat-compile-time.patch"
-  "9999-iwlwifi-cmd_ver-range_checking.patch"
   "1130-sched-Introduce-Cache-aware-scheduling-V3.patch"
+  # custom changes
+  "9999-fix-ax1775-wifi.patch"
+  "9998-fix-pmdomain-include.patch"
 )
 
 export KBUILD_BUILD_HOST=archlinux
@@ -157,9 +158,6 @@ prepare() {
     elif [[ $src == "9999-sched_feat-compile-time.patch" && $_sched_feat_comp == "y" ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
-    elif [[ $src == "9999-iwlwifi-cmd_ver-range_checking.patch" && $_revert_iwlwifi_cmdver == "y" ]]; then
-      echo "Applying patch $src..."
-      patch -Rp1 < "../$src"
     elif [[ $src == *.patch ]]; then
       echo "Applying patch $src..."
       patch -Np1 < "../$src"
@@ -168,7 +166,7 @@ prepare() {
 
   echo "Setting config..."
 
-  # CHANGED: Use /proc/config.gz instead of config files
+  # Use /proc/config.gz instead of config files
   if [[ -r /proc/config.gz ]]; then
     echo "Using config from running kernel (/proc/config.gz)..."
     zcat /proc/config.gz > .config
@@ -182,15 +180,28 @@ prepare() {
     fi
   fi
 
-  # CRITICAL: Enable RT preemption (not in original!)
-  echo "Enabling RT preemption..."
+  echo "Applying default config..."
+  make olddefconfig
+
+  # Force CONFIG_EXPERT, which is a prerequisite for PREEMPT_RT
+  echo "Enabling CONFIG_EXPERT..."
+  scripts/config --enable CONFIG_EXPERT
+
+  # Enable RT preemption (not in original!)
+  echo "Enabling RealTime preemption..."
   scripts/config --disable CONFIG_PREEMPT_NONE
   scripts/config --disable CONFIG_PREEMPT_VOLUNTARY
   scripts/config --disable CONFIG_PREEMPT
   scripts/config --enable CONFIG_PREEMPT_RT
   scripts/config --enable CONFIG_PREEMPT_RT_FULL
 
-  # CRITICAL: Override NUMA disable
+  echo "Enabling Intel WiFi MLD support (CONFIG_IWLMLD)..."
+  scripts/config --module CONFIG_IWLMLD
+
+  echo "Applying final default configuration after forced settings..."
+  make olddefconfig
+
+  # Override NUMA disable
   if [ -n "$_NUMAdisable" ]; then
     echo "WARNING: Ignoring _NUMAdisable for better compatibility"
     # Ensure NUMA stays enabled
@@ -204,6 +215,8 @@ prepare() {
   scripts/config --module CONFIG_HID_GENERIC
   scripts/config --module CONFIG_USB_STORAGE
 
+  # causing build errors (device_pm_check_callbacks not defined)
+  scripts/config --disable CONFIG_PM_GENERIC_DOMAINS
   # Continue with original optimizations
   if [ -n "$_use_auto_optimization" ]; then
     "${srcdir}"/auto-cpu-optimization.sh
@@ -329,8 +342,6 @@ prepare() {
   fi
 
 
-  echo "Applying default config..."
-  make olddefconfig
   make -s kernelrelease > version
   echo "Prepared $pkgbase version $(<version)"
 
@@ -466,7 +477,6 @@ done
 sha256sums=('95c47f76a60170be0febb0860d9050e432c3471c8b78a486f56ec18ce31e8c16'
             'd97fbe6ae21d397250cbe64b54cfa5db939300a0b153f6e6857c785ba1b3eec1'
             '0d88a1316db91ab731c24e9ffaeec0dbb9be308ab571b5bea71dfffdd90bffbc'
-            '876e384b37d6aa39a5f30bc01b80ec8b7c28c856aa828e4db7a6afc6dec01c2a'
             'e1d45b5842079a5f0f53d7ea2d66ffa3f1497766f3ccffcf13ed00f1ac67f95e'
             '19007cf46fbd578d0a2c0a2940cdbca92d31d3ca31b72ddcac0cfe6690e9bf90'
             '5c2a0c96dfa0909f1def1bf9ef0ad9b7e1b90263ca751a2cbd0956d009f0f7cb'
@@ -479,7 +489,6 @@ sha256sums=('95c47f76a60170be0febb0860d9050e432c3471c8b78a486f56ec18ce31e8c16'
             'bc95118f9a6840fa6aabb3a475b9659088a47d1ed1eb4e7880b03eaec7d68aa5'
             '59b410a6cbe6a33c91f54139e4a710fbd2dc29e771d60d49b7ec715d3d7e12fe'
             '17ff4ea2bf922badba9a6e2451d930d303ae9f55733900194f4e345c7d178b9a'
-            'a7171f2bad5fb36288ce91abaea4438b176fbf25ad911f93b51373eaaef7ed65'
             'd670d04c03e41f3dbc0ec9c49e50ba2231f610d8d34cb46e341baef3a8002a27'
             '973ecc4b169496a56bcc65e559c40bccab9744234717d74a2d472c2730c4466e'
             '7ace8f9481f30fa351f5197a809243f6f901b6bb30eb811c9eb29280acc30fca'
@@ -501,5 +510,6 @@ sha256sums=('95c47f76a60170be0febb0860d9050e432c3471c8b78a486f56ec18ce31e8c16'
             'd02a7971e78702faee8625bdad452468b65db7606bc735c9257ff97d092a6b08'
             '208f528aa4039971d6b64b6a6e712f29dee5ec89ec2f680f4f9a637d598c01d3'
             '5c8e2ec59f1e42f1dcc6d5527fcee741aef9e4832735facb96fc8d7fe2ea08b6'
-            '4b06d1f159ded182e85413e1f54004438e91aa5c7eb3f83ef1c867a33e950c81'
-            'cc6bb84cef2c628bd13d7df3859824555a8e4c53abc5e1e7851930d215e625b1')
+            'cc6bb84cef2c628bd13d7df3859824555a8e4c53abc5e1e7851930d215e625b1'
+            'cfab72259baf10b03ad531dd1f9aa64961eb5eccc01f6b55a49f854b5af143a8'
+            '5db19b6d3007906f298b7b1ea611e1dc95c8d7e6440c0d8a9b45a33e161c4aa2')
